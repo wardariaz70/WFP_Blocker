@@ -212,21 +212,25 @@ CLEANUP:
 }
 // wfpTest.cpp : This file contains the 'main' function. Program execution begins and ends there.
 //
+
+
 int main()
 {
-	std::cout << "Adding a WFP filter to block all traffic to 8.8.8.8...\n";
+	std::cout << "Adding a WFP filter to block all traffic to 192.168.18.154...\n";
 
 	DWORD result = NO_ERROR;
 	HANDLE engineHandle = NULL;
 	UINT64 filterId = 0;
+	UINT64 newfilterId = 0;
 
-	// Define the remote IP address for 8.8.8.8
+	// Define the remote IP address for 192.168.18.154
 	SOCKADDR_IN remoteAddr;
 	ZeroMemory(&remoteAddr, sizeof(remoteAddr));
 	remoteAddr.sin_family = AF_INET;
 	// Port is not needed to block all traffic, so set to 0
-	remoteAddr.sin_port = 0;
-	remoteAddr.sin_addr.s_addr = inet_addr("8.8.8.8");
+	//remoteAddr.sin_port = 0;
+	remoteAddr.sin_port = htons(9999); // block only port 9999
+	remoteAddr.sin_addr.s_addr = inet_addr("192.168.18.154");
 
 	FWPM_FILTER_CONDITION0 conds[4];
 	UINT32 numConds;
@@ -237,13 +241,12 @@ int main()
 		NULL,
 		NULL,
 		(const SOCKADDR*)&remoteAddr,
-		0,  // Specify 0 to not filter by protocol
+		IPPROTO_UDP,  // UDP only
 		4,
 		conds,
 		&numConds,
 		&appId
 	);
-
 	if (result != ERROR_SUCCESS)
 	{
 		printf("InitFilterConditions failed: 0x%08X\n", result);
@@ -267,11 +270,13 @@ int main()
 	ZeroMemory(&filter, sizeof(filter));
 
 	// Let the engine assign a key
-	filter.displayData.name = const_cast<wchar_t*>(L"Block All Traffic to 8.8.8.8");
-	filter.displayData.description = const_cast<wchar_t*>(L"Blocks all outbound connections to 8.8.8.8.");
+	filter.displayData.name = const_cast<wchar_t*>(L"Block All Traffic to 192.168.18.154");
+	filter.displayData.description = const_cast<wchar_t*>(L"Blocks all outbound connections to 192.168.18.154.");
 
 	// Use a more general layer to catch all outbound connections
-	filter.layerKey = FWPM_LAYER_ALE_AUTH_CONNECT_V4;
+	/*filter.layerKey = FWPM_LAYER_ALE_AUTH_CONNECT_V4;*/
+	//filter.layerKey = FWPM_LAYER_OUTBOUND_TRANSPORT_V4;
+	filter.layerKey = FWPM_LAYER_INBOUND_TRANSPORT_V4;
 	filter.subLayerKey = FWPM_SUBLAYER_UNIVERSAL;
 
 	// The action is to block the traffic
@@ -291,13 +296,53 @@ int main()
 		printf("FwpmFilterAdd0 failed: 0x%08X\n", result);
 		goto CLEANUP;
 	}
+	/////////////////////////////////
+	FWPM_FILTER0 newfilter;
+	ZeroMemory(&newfilter, sizeof(newfilter));
+
+	// Let the engine assign a key
+	newfilter.displayData.name = const_cast<wchar_t*>(L"Block outbound Traffic to 192.168.18.154");
+	newfilter.displayData.description = const_cast<wchar_t*>(L"Blocks outbound connections to 192.168.18.154.");
+
+	newfilter.layerKey = FWPM_LAYER_OUTBOUND_TRANSPORT_V4;
+	newfilter.subLayerKey = FWPM_SUBLAYER_UNIVERSAL;
+
+	// The action is to block the traffic
+	newfilter.action.type = FWP_ACTION_BLOCK;
+
+	newfilter.numFilterConditions = numConds;
+	newfilter.filterCondition = conds;
+
+	result = FwpmFilterAdd0(
+		engineHandle,
+		&newfilter,
+		NULL,
+		&newfilterId
+	);
+	if (result != ERROR_SUCCESS)
+	{
+		printf("FwpmFilterAdd0 failed: 0x%08X\n", result);
+		goto CLEANUP;
+	}
 
 	printf("Filter added successfully with ID: %llu\n", filterId);
+
+	printf("Filter added successfully with ID: %llu\n", newfilterId);
 
 	printf("Press any key to delete the filter and exit.\n");
 	_getch();
 	printf("Deleting filter with ID: %llu\n", filterId);
 	result = FwpmFilterDeleteById0(engineHandle, filterId);
+	if (result != ERROR_SUCCESS)
+	{
+		printf("FwpmFilterDeleteById0 failed: 0x%08X\n", result);
+	}
+	else
+	{
+		printf("Filter deleted successfully.\n");
+	}
+
+	result = FwpmFilterDeleteById0(engineHandle, newfilterId);
 	if (result != ERROR_SUCCESS)
 	{
 		printf("FwpmFilterDeleteById0 failed: 0x%08X\n", result);
